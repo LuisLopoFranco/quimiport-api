@@ -1,0 +1,3 @@
+# Normaliza fins de linha (evita problemas de CRLF no Windows com Docker e scripts)
+* text=auto eol=lf
+*.png binary

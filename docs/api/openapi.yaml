@@ -1,0 +1,458 @@
+openapi: 3.0.3
+info:
+  title: QuimiPort API
+  version: 1.0.0
+  description: |
+    API backend do **QuimiPort**, sistema de gestão de cargas químicas inspirado nas operações do Porto de Santos.
+
+    ## Principais regras de negócio
+    - Produto químico não pode ser cadastrado sem **nome**, sem **classe de risco** ou com **status inválido**.
+    - Produto **inativo** não pode ser usado em novas cargas.
+    - Carga exige **produto associado**, **quantidade > 0** e **responsável técnico**.
+    - Carga só é **liberada** com a documentação obrigatória (**FISPQ** e **FICHA_EMERGENCIA**) dentro da validade.
+    - Toda mudança de status passa pela máquina de estados abaixo; o que não está nela é proibido.
+
+    | De | Para (permitido) |
+    |---|---|
+    | REGISTRADA | EM_ANALISE, CANCELADA |
+    | EM_ANALISE | EM_INSPECAO, CANCELADA |
+    | EM_INSPECAO | LIBERADA, BLOQUEADA, CANCELADA |
+    | LIBERADA | EM_MOVIMENTACAO, CANCELADA |
+    | BLOQUEADA | CANCELADA |
+    | EM_MOVIMENTACAO | FINALIZADA |
+    | FINALIZADA | — (terminal) |
+    | CANCELADA | — (terminal) |
+
+    ## Formato de erro
+    Todos os erros seguem `{ "erro": { "codigo", "mensagem", "detalhes" } }`.
+
+    | HTTP | codigo | Quando |
+    |---|---|---|
+    | 400 | VALIDATION_ERROR | Campo ausente/inválido |
+    | 404 | NOT_FOUND | Recurso inexistente |
+    | 409 | CONFLICT | Código de carga duplicado |
+    | 422 | BUSINESS_RULE_VIOLATION | Regra de negócio violada (transição proibida, produto inativo, documentação pendente...) |
+    | 500 | INTERNAL_ERROR | Erro inesperado |
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: Produtos químicos
+  - name: Cargas químicas
+  - name: Infra
+paths:
+  /produtos-quimicos:
+    post:
+      tags: [Produtos químicos]
+      summary: Cria um produto químico
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProdutoInput' }
+            example:
+              nome: Etanol
+              descricao: Álcool etílico anidro
+              numeroOnu: '1170'
+              classeRisco: '3'
+              status: ATIVO
+      responses:
+        '201':
+          description: Produto criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '400':
+          description: Dados inválidos (ex. sem nome ou sem classe de risco)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example:
+                erro: { codigo: VALIDATION_ERROR, mensagem: Um produto químico não pode ser cadastrado sem nome }
+    get:
+      tags: [Produtos químicos]
+      summary: Lista produtos químicos
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [ATIVO, INATIVO] }
+      responses:
+        '200':
+          description: Lista de produtos
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Produto' } }
+  /produtos-quimicos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Produtos químicos]
+      summary: Busca produto por id
+      responses:
+        '200':
+          description: Produto encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+    put:
+      tags: [Produtos químicos]
+      summary: Atualiza um produto (substituição completa)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProdutoInput' }
+      responses:
+        '200':
+          description: Produto atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '400': { $ref: '#/components/responses/Invalido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+  /produtos-quimicos/{id}/inativar:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Produtos químicos]
+      summary: Inativa um produto (exclusão lógica)
+      responses:
+        '200':
+          description: Produto inativado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422': { $ref: '#/components/responses/RegraNegocio' }
+  /cargas-quimicas:
+    post:
+      tags: [Cargas químicas]
+      summary: Registra uma carga química (status inicial REGISTRADA)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CargaInput' }
+            example:
+              codigo: QP-2026-0001
+              produtoQuimicoId: 11111111-1111-4111-8111-111111111111
+              quantidade: 25000
+              unidadeMedida: L
+              origem: Terminal Alemoa - Santos/SP
+              destino: Paulínia/SP
+              responsavelTecnico: { nome: Maria Souza, registroProfissional: CRQ-IV 04123456 }
+              documentos:
+                - { tipo: FISPQ, numero: FISPQ-ETANOL-01, dataValidade: '2027-12-31' }
+                - { tipo: FICHA_EMERGENCIA, numero: FE-1170-01, dataValidade: '2027-12-31' }
+      responses:
+        '201':
+          description: Carga registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Carga' }
+        '400':
+          description: Dados inválidos (quantidade <= 0, sem responsável técnico, sem produto...)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example:
+                erro: { codigo: VALIDATION_ERROR, mensagem: A quantidade da carga deve ser maior que zero }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '409':
+          description: Código de carga já existe
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+        '422':
+          description: Produto inativo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example:
+                erro: { codigo: BUSINESS_RULE_VIOLATION, mensagem: Uma carga química não pode ser registrada com produto químico inativo }
+    get:
+      tags: [Cargas químicas]
+      summary: Lista cargas químicas
+      parameters:
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/StatusCarga' }
+        - in: query
+          name: produtoQuimicoId
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Lista de cargas
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Carga' } }
+  /cargas-quimicas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Cargas químicas]
+      summary: Busca carga por id (inclui os dados do produto)
+      responses:
+        '200':
+          description: Carga encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Carga' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+  /cargas-quimicas/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Cargas químicas]
+      summary: Altera o status da carga (validado pela máquina de estados)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/StatusCarga' }
+                motivo: { type: string, description: Obrigatório quando status = BLOQUEADA }
+            example: { status: EM_ANALISE }
+      responses:
+        '200':
+          description: Status alterado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Carga' }
+        '400': { $ref: '#/components/responses/Invalido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422':
+          description: Transição proibida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example:
+                erro:
+                  codigo: BUSINESS_RULE_VIOLATION
+                  mensagem: Uma carga bloqueada não pode entrar em movimentação
+                  detalhes: { statusAtual: BLOQUEADA, statusSolicitado: EM_MOVIMENTACAO, permitidos: [CANCELADA] }
+  /cargas-quimicas/{id}/bloquear:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Cargas químicas]
+      summary: Bloqueia a carga (somente a partir de EM_INSPECAO)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo]
+              properties: { motivo: { type: string } }
+            example: { motivo: Lacre do contêiner violado }
+      responses:
+        '200': { description: Carga bloqueada, content: { application/json: { schema: { $ref: '#/components/schemas/Carga' } } } }
+        '400': { $ref: '#/components/responses/Invalido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422': { $ref: '#/components/responses/RegraNegocio' }
+  /cargas-quimicas/{id}/liberar:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Cargas químicas]
+      summary: Libera a carga (exige EM_INSPECAO e documentação obrigatória válida)
+      responses:
+        '200': { description: Carga liberada, content: { application/json: { schema: { $ref: '#/components/schemas/Carga' } } } }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422':
+          description: Documentação pendente ou transição proibida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example:
+                erro:
+                  codigo: BUSINESS_RULE_VIOLATION
+                  mensagem: Uma carga não pode ser liberada sem documentação obrigatória
+                  detalhes: { documentosPendentesOuVencidos: [FICHA_EMERGENCIA] }
+  /cargas-quimicas/{id}/cancelar:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Cargas químicas]
+      summary: Cancela a carga (cancelamento lógico)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { motivo: { type: string } }
+      responses:
+        '200': { description: Carga cancelada, content: { application/json: { schema: { $ref: '#/components/schemas/Carga' } } } }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422': { $ref: '#/components/responses/RegraNegocio' }
+  /cargas-quimicas/{id}/documentos:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Cargas químicas]
+      summary: Anexa um documento à carga
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Documento' }
+            example: { tipo: FICHA_EMERGENCIA, numero: FE-1170-01, dataValidade: '2027-12-31' }
+      responses:
+        '201': { description: Documento anexado, content: { application/json: { schema: { $ref: '#/components/schemas/Carga' } } } }
+        '400': { $ref: '#/components/responses/Invalido' }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+        '422': { $ref: '#/components/responses/RegraNegocio' }
+  /cargas-quimicas/{id}/historico:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Cargas químicas]
+      summary: Histórico de mudanças de status (auditoria)
+      responses:
+        '200':
+          description: Histórico em ordem cronológica
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    statusAnterior: { type: string, nullable: true }
+                    statusNovo: { type: string }
+                    motivo: { type: string, nullable: true }
+                    alteradoEm: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NaoEncontrado' }
+  /graphql:
+    post:
+      tags: [Infra]
+      summary: Endpoint GraphQL (diferencial, somente leitura)
+      description: |
+        Queries disponíveis: `cargasPorStatus(status)`, `produtoQuimico(id)`, `validarTransicao(de, para)`.
+      requestBody:
+        content:
+          application/json:
+            example:
+              query: '{ cargasPorStatus(status: REGISTRADA) { codigo quantidade produtoQuimico { nome classeRisco } } }'
+      responses:
+        '200': { description: Resultado GraphQL }
+  /health:
+    get:
+      tags: [Infra]
+      summary: Saúde da API e do banco
+      responses:
+        '200': { description: OK }
+        '503': { description: Banco indisponível }
+  /metrics:
+    get:
+      tags: [Infra]
+      summary: Métricas no formato Prometheus
+      responses:
+        '200': { description: Métricas em texto }
+components:
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    NaoEncontrado:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+          example: { erro: { codigo: NOT_FOUND, mensagem: Carga química não encontrada } }
+    Invalido:
+      description: Dados de entrada inválidos
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+    RegraNegocio:
+      description: Regra de negócio violada
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+          example: { erro: { codigo: BUSINESS_RULE_VIOLATION, mensagem: Uma carga cancelada não pode ser liberada } }
+  schemas:
+    StatusCarga:
+      type: string
+      enum: [REGISTRADA, EM_ANALISE, EM_INSPECAO, LIBERADA, BLOQUEADA, EM_MOVIMENTACAO, FINALIZADA, CANCELADA]
+    ClasseRisco:
+      type: string
+      description: Classe/subclasse de risco da ONU
+      enum: ['1', '2.1', '2.2', '2.3', '3', '4.1', '4.2', '4.3', '5.1', '5.2', '6.1', '6.2', '7', '8', '9']
+    ProdutoInput:
+      type: object
+      required: [nome, numeroOnu, classeRisco]
+      properties:
+        nome: { type: string, maxLength: 150 }
+        descricao: { type: string, nullable: true }
+        numeroOnu: { type: string, example: '1170', description: '4 dígitos, aceita prefixo UN' }
+        classeRisco: { $ref: '#/components/schemas/ClasseRisco' }
+        grupoCompatibilidade:
+          type: string
+          nullable: true
+          enum: [A, B, C, D, E, F, G, H, J, K, L, N, S]
+        status: { type: string, enum: [ATIVO, INATIVO], default: ATIVO }
+    Produto:
+      allOf:
+        - $ref: '#/components/schemas/ProdutoInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    Documento:
+      type: object
+      required: [tipo, numero, dataValidade]
+      properties:
+        tipo: { type: string, enum: [FISPQ, FICHA_EMERGENCIA, NOTA_FISCAL, LAUDO_TECNICO, CERTIFICADO_ANALISE, OUTRO] }
+        numero: { type: string }
+        dataValidade: { type: string, format: date }
+    CargaInput:
+      type: object
+      required: [codigo, produtoQuimicoId, quantidade, unidadeMedida, origem, destino, responsavelTecnico]
+      properties:
+        codigo: { type: string, maxLength: 30 }
+        produtoQuimicoId: { type: string, format: uuid }
+        quantidade: { type: number, minimum: 0, exclusiveMinimum: true }
+        unidadeMedida: { type: string, enum: [KG, T, L, M3] }
+        origem: { type: string }
+        destino: { type: string }
+        responsavelTecnico:
+          type: object
+          required: [nome, registroProfissional]
+          properties:
+            nome: { type: string }
+            registroProfissional: { type: string }
+        documentos: { type: array, items: { $ref: '#/components/schemas/Documento' } }
+        dataEntrada: { type: string, format: date-time, description: 'Padrão: momento do registro' }
+    Carga:
+      allOf:
+        - $ref: '#/components/schemas/CargaInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { $ref: '#/components/schemas/StatusCarga' }
+            motivoBloqueio: { type: string, nullable: true }
+            documentosPendentes: { type: array, items: { type: string }, description: Documentos obrigatórios ausentes ou vencidos }
+            proximosStatusPermitidos: { type: array, items: { $ref: '#/components/schemas/StatusCarga' } }
+            produtoQuimico: { $ref: '#/components/schemas/Produto' }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    Erro:
+      type: object
+      properties:
+        erro:
+          type: object
+          properties:
+            codigo: { type: string }
+            mensagem: { type: string }
+            detalhes: {}

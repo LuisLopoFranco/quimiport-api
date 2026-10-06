@@ -1,0 +1,39 @@
+{
+  "title": "QuimiPort API",
+  "uid": "quimiport-api",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Requisições por segundo (por rota)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (route) (rate(quimiport_http_request_duration_seconds_count[1m]))", "legendFormat": "{{route}}" }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Latência p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(quimiport_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95" }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Cargas registradas",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(quimiport_cargas_registradas_total)" }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Erros 4xx/5xx (5 min)",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase(quimiport_http_request_duration_seconds_count{status_code=~\"4..|5..\"}[5m]))" }]
+    },
+    {
+      "id": 5, "type": "bargauge", "title": "Mudanças de status (destino)",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (para) (quimiport_mudancas_status_total)", "legendFormat": "{{para}}" }]
+    }
+  ]
+}

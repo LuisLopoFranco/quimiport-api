@@ -1,0 +1,101 @@
+### QuimiPort - requisições de exemplo
+### Use com a extensão "REST Client" do VS Code (ou copie para o Insomnia/Postman).
+### Rode antes o seed (as requisições 4 e 5 usam os ids fixos dele):
+###   local: npm run db:seed    |    Docker: docker compose exec api npm run db:seed:prod
+
+@base = http://localhost:3000
+@etanol = 11111111-1111-4111-8111-111111111111
+@inativo = 55555555-5555-4555-8555-555555555555
+
+### 1. Criar produto químico
+POST {{base}}/produtos-quimicos
+Content-Type: application/json
+
+{
+  "nome": "Gasolina",
+  "descricao": "Gasolina automotiva",
+  "numeroOnu": "UN1203",
+  "classeRisco": "3"
+}
+
+### 2. Regra: produto sem nome (espera 400)
+POST {{base}}/produtos-quimicos
+Content-Type: application/json
+
+{ "numeroOnu": "1203", "classeRisco": "3" }
+
+### 3. Listar produtos ativos
+GET {{base}}/produtos-quimicos?status=ATIVO
+
+### 4. Registrar carga SEM a ficha de emergência
+### (se responder 409, o código já foi usado antes: troque por um novo, ex. QP-DEMO-0003, e rode de novo da 4 à 10)
+# @name carga
+POST {{base}}/cargas-quimicas
+Content-Type: application/json
+
+{
+  "codigo": "QP-DEMO-0001",
+  "produtoQuimicoId": "{{etanol}}",
+  "quantidade": 25000,
+  "unidadeMedida": "L",
+  "origem": "Terminal Alemoa - Santos/SP",
+  "destino": "Paulínia/SP",
+  "responsavelTecnico": { "nome": "Maria Souza", "registroProfissional": "CRQ-IV 04123456" },
+  "documentos": [{ "tipo": "FISPQ", "numero": "FISPQ-ETANOL-01", "dataValidade": "2027-12-31" }]
+}
+
+### 5. Regra: carga com produto inativo (espera 422)
+POST {{base}}/cargas-quimicas
+Content-Type: application/json
+
+{
+  "codigo": "QP-DEMO-0002",
+  "produtoQuimicoId": "{{inativo}}",
+  "quantidade": 100,
+  "unidadeMedida": "T",
+  "origem": "Santos",
+  "destino": "Cubatão",
+  "responsavelTecnico": { "nome": "João Lima", "registroProfissional": "CRQ-IV 0999" }
+}
+
+### 6. Fluxo: Registrada -> Em análise
+PATCH {{base}}/cargas-quimicas/{{carga.response.body.id}}/status
+Content-Type: application/json
+
+{ "status": "EM_ANALISE" }
+
+### 7. Em análise -> Em inspeção
+PATCH {{base}}/cargas-quimicas/{{carga.response.body.id}}/status
+Content-Type: application/json
+
+{ "status": "EM_INSPECAO" }
+
+### 8. Regra: liberar sem documentação obrigatória (espera 422)
+PATCH {{base}}/cargas-quimicas/{{carga.response.body.id}}/liberar
+
+### 9. Anexar a ficha de emergência
+POST {{base}}/cargas-quimicas/{{carga.response.body.id}}/documentos
+Content-Type: application/json
+
+{ "tipo": "FICHA_EMERGENCIA", "numero": "FE-1170-01", "dataValidade": "2027-12-31" }
+
+### 10. Agora libera (espera 200)
+PATCH {{base}}/cargas-quimicas/{{carga.response.body.id}}/liberar
+
+### 11. Regra: Liberada -> Registrada é proibida (espera 422)
+PATCH {{base}}/cargas-quimicas/{{carga.response.body.id}}/status
+Content-Type: application/json
+
+{ "status": "REGISTRADA" }
+
+### 12. Histórico de status
+GET {{base}}/cargas-quimicas/{{carga.response.body.id}}/historico
+
+### 13. Listar cargas liberadas
+GET {{base}}/cargas-quimicas?status=LIBERADA
+
+### 14. GraphQL: cargas por status com dados do produto
+POST {{base}}/graphql
+Content-Type: application/json
+
+{ "query": "{ cargasPorStatus(status: LIBERADA) { codigo quantidade unidadeMedida produtoQuimico { nome classeRisco numeroOnu } } }" }
