@@ -6,8 +6,6 @@ API backend para gestão de **cargas químicas em contexto portuário**, inspira
 Projeto do **Tech Challenge – Fase 2** da Pós-Tech **Full Stack Development (FIAP/POSTECH)**, continuação da
 modelagem feita na Fase 1 ([quimiport-docs](https://github.com/LuisLopoFranco/quimiport-docs)).
 
-> 📘 **Quer ver como tudo foi construído, passo a passo?** Comece pelo [Guia de construção](docs/guia/00-indice.md).
-
 ![Swagger da API](docs/guia/img/swagger.png)
 
 ---
